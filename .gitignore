@@ -1,0 +1,3 @@
+terraform-provider-flexecho/build-local.ps1
+terraform-provider-flexecho/build-local.sh
+/terraform-provider-flexecho/bin

@@ -1,7 +1,7 @@
 # flexecho provider build vars. the build-local scripts read these so nothing drifts
 NAME=flexecho
 BINARY=terraform-provider-${NAME}
-VERSION=0.1.0
+VERSION=0.1.1
 HOSTNAME=localdomain
 NAMESPACE=provider
 OS_ARCH=$(shell go env GOOS)_$(shell go env GOARCH)

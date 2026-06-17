@@ -109,11 +109,8 @@ func resourceFlexEchoEchoDBCreate(d *schema.ResourceData, m interface{}) error {
 		return err
 	}
 
-	pollID := task.RequestID
-	if pollID == "" {
-		pollID = task.RefID
-	}
-	if _, err := client.WaitForTask(pollID, 5, 1800); err != nil {
+	// request_id isnt the queryable task id, so wait by matching ref_id
+	if _, err := client.WaitForTaskByRef(task.RefID, 5, 1800); err != nil {
 		return err
 	}
 
@@ -140,11 +137,8 @@ func resourceFlexEchoEchoDBDelete(d *schema.ResourceData, m interface{}) error {
 	if err != nil {
 		return err
 	}
-	pollID := task.RequestID
-	if pollID == "" {
-		pollID = task.RefID
-	}
-	if _, err := client.WaitForTask(pollID, 5, 1800); err != nil {
+	// request_id isnt the queryable task id, so wait by matching ref_id
+	if _, err := client.WaitForTaskByRef(task.RefID, 5, 1800); err != nil {
 		return err
 	}
 	d.SetId("")

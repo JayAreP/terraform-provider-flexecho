@@ -99,29 +99,20 @@ func resourceFlexEchoDBSnapshotCreate(d *schema.ResourceData, m interface{}) err
 		return err
 	}
 
-	// async, poll the task til its done
-	// TODO(verify-live): confirm which field is the poll id (request_id vs ref_id)
-	// and which carrys the new snapshot id once we see a real 202 body
-	// pollID := task.RefID
-	pollID := task.RequestID
-	if pollID == "" {
-		pollID = task.RefID
-	}
-	done, err := client.WaitForTask(pollID, 5, 1800)
-	if err != nil {
+	// the create 202 only gives a ref_id; request_id is NOT the queryable task id
+	// (the real one is the task's taskid). so wait on the task by matching ref_id
+	if _, err := client.WaitForTaskByRef(task.RefID, 5, 1800); err != nil {
 		return err
 	}
 
-	// figure out the new snap id. ref_id is the best guess, else scan the host
-	snapID := done.RefID
-	if snapID == "" {
-		snapID, err = resolveLatestSnapshotForHost(client, req.SourceHostID)
-		if err != nil {
-			return err
-		}
+	// ref_id is the task ref, NOT the snapshot id, so dont trust it for the id.
+	// resolve the new snap off the snapshot list instead
+	snapID, err := resolveLatestSnapshotForHost(client, req.SourceHostID)
+	if err != nil {
+		return err
 	}
 	if snapID == "" {
-		return fmt.Errorf("snapshot created but could not resolve its id from task %s", pollID)
+		return fmt.Errorf("snapshot task (ref %s) finished but no snapshot turned up for host %s", task.RefID, req.SourceHostID)
 	}
 	d.SetId(snapID)
 	return resourceFlexEchoDBSnapshotRead(d, m)
@@ -146,22 +137,47 @@ func resourceFlexEchoDBSnapshotRead(d *schema.ResourceData, m interface{}) error
 
 func resourceFlexEchoDBSnapshotDelete(d *schema.ResourceData, m interface{}) error {
 	client := m.(*sdk.Credentials)
-	if err := client.DeleteDBSnapshot(d.Id()); err != nil {
+	task, err := client.DeleteDBSnapshot(d.Id())
+	if err != nil {
 		return err
 	}
+
+	// delete is async like create. wait on the task (matched by ref_id) so a failed
+	// delete (eg the snap still has dependent echo dbs) surfaces, instead of terraform
+	// dropping it from state while the array still has it. if delete ever comes back
+	// synchronous (no ref_id) we just skip the wait
+	if task != nil && task.RefID != "" {
+		if _, err := client.WaitForTaskByRef(task.RefID, 5, 1800); err != nil {
+			return err
+		}
+	}
+
 	d.SetId("")
 	return nil
 }
 
-// fallback for when the task body doesnt hand back the new snap id. lists the
-// hosts snap ids and grabs the last one. best effort, see the verify-live todo above
+// task body doesnt hand back the new snap id, so resolve it off the global snap
+// list -- same list Read uses, so the readback is guaranteed to find it. newest
+// timestamp for the host wins
 func resolveLatestSnapshotForHost(client *sdk.Credentials, hostID string) (string, error) {
-	resp, err := client.GetHostDBSnapshotIDs(hostID)
+	// resp, err := client.GetHostDBSnapshotIDs(hostID)
+	// return resp.DBSnapshotIDs[len(resp.DBSnapshotIDs)-1], nil // per-host ids didnt line up with the global list
+	snaps, err := client.GetDBSnapshots()
 	if err != nil {
 		return "", err
 	}
-	if resp == nil || len(resp.DBSnapshotIDs) == 0 {
-		return "", nil
+
+	newestID := ""
+	newestTS := -1
+	for _, s := range snaps {
+		// skip other hosts, but only if the list actually populates host_id
+		if hostID != "" && s.HostID != "" && s.HostID != hostID {
+			continue
+		}
+		if s.Timestamp >= newestTS {
+			newestTS = s.Timestamp
+			newestID = s.ID
+		}
 	}
-	return resp.DBSnapshotIDs[len(resp.DBSnapshotIDs)-1], nil
+	return newestID, nil
 }

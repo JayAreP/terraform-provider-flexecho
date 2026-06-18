@@ -33,13 +33,18 @@ resource "flexecho_db_snapshot" "nightly" {
   consistency_level = "application"
 }
 
-# clone an echo db FROM that snapshot onto another host
+# replicate (clone) source dbs out to one or more destination hosts
 resource "flexecho_echo_db" "orders_clone" {
-  snapshot_id         = flexecho_db_snapshot.nightly.id
-  destination_host_id = "sql02"
-  destination_db_id   = "db-orders"
-  destination_db_name = "orders_clone"
-  target_state        = "online"
+  source_host_id = flexecho_host.sql01.host_id
+  database_ids   = ["db-orders"]
+
+  destination {
+    host_id = "sql02"
+    db_id   = "db-orders"
+    db_name = "orders_clone"
+  }
+
+  target_state = "online"
 }
 
 # an app token (core flex api)
